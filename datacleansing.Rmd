@@ -1,0 +1,274 @@
+---
+title: "datacleansing"
+author: "chrisantonius"
+date: "2022-10-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+options(scipen = 9999)
+
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(modelr)
+library(naniar)
+library(janitor)
+library(dplyr)
+library(scales)
+library(flexdashboard)
+library(plotly)
+library(glue)
+library(highcharter)
+library(hrbrthemes)
+
+airbnb <- read_csv("data_input/Airbnb_Open_Data.csv")
+airbnb
+```
+
+```{r}
+summary(airbnb)
+```
+
+
+```{r}
+# Remove unwanted columns
+airbnb_select <- airbnb %>% 
+  select(id, `host id`, host_identity_verified,`host name`, `neighbourhood group`, neighbourhood, lat, long,country,`country code`, instant_bookable, cancellation_policy, `room type`, `Construction year`, price,`service fee`,`minimum nights`,`number of reviews`,`last review`, `review rate number`)
+```
+
+
+```{r}
+# Rename the columns
+airbnb_select <- rename(airbnb_select, listing_id = id, 
+                    host_id = `host id`,
+                    host_verification_status = host_identity_verified,
+                    host_name = `host name`,
+                    neighbourhood_group = `neighbourhood group`,
+                    country_code = `country code`,
+                    instant_booking = instant_bookable,
+                    room_type = `room type`,
+                    construction_year = `Construction year`,
+                    service_fee = `service fee`,
+                    minimum_nights = `minimum nights`,
+                    number_of_reviews = `number of reviews`,
+                    date_last_review = `last review`,
+                    rating = `review rate number`)
+```
+
+```{r}
+summary(airbnb_select)
+```
+
+
+```{r}
+# Remove entries with 'NA' from columns
+airbnb_select <- airbnb_select %>% 
+  filter(!is.na(lat) & !is.na(long) & !is.na(instant_booking) & !is.na(construction_year)
+         & !is.na(minimum_nights ) & !is.na(number_of_reviews)& !is.na(rating )
+         )
+```
+
+```{r}
+# Remove entries where have empty value
+vis_miss(airbnb_select,warn_large_data = FALSE)
+```
+```{r}
+airbnb_select <- airbnb_select %>% 
+  filter(!host_verification_status == "" & !host_name=="" & !neighbourhood_group=="" & !neighbourhood == ""
+         & !country == "" & !country_code == "" & !price == "" & !service_fee == "" & !date_last_review== "" & !rating== "")
+```
+
+
+```{r}
+airbnb_select$neighbourhood_group <- gsub("brookln", "Brooklyn", airbnb_select$neighbourhood_group)
+```
+
+
+```{r}
+str(airbnb_select)
+```
+
+```{r}
+airbnb_select
+```
+
+```{r}
+airbnb_clean <- airbnb_select %>%
+  mutate(price = str_replace_all(price,"([$,])", ""),
+         service_fee = str_replace_all(service_fee, "([$,])", "")) %>%
+  mutate(date_last_review = mdy(date_last_review),
+         year_last_review = year(date_last_review)) %>% 
+  mutate(price = as.double(price),
+         service_fee = as.double(service_fee),
+         host_verification_status = as.factor(host_verification_status),
+         neighbourhood_group = as.factor(neighbourhood_group),
+         neighbourhood = as.factor(neighbourhood),
+         country = as.factor(country),
+         country_code = as.factor(country_code),
+         cancellation_policy = as.factor(cancellation_policy),
+         room_type = as.factor(room_type)) %>% 
+  mutate(rating_per_reviews = rating / number_of_reviews,
+         price_service_percentage = (service_fee / price)*100 )
+```
+```{r}
+airbnb_clean
+```
+```{r}
+unique(airbnb_clean$year_last_review)
+```
+
+
+```{r}
+neigh_tools <- airbnb_clean %>% 
+    group_by(neighbourhood_group) %>% 
+    summarize(Rating_per_Reviews = sum(rating_per_reviews)) %>% 
+    arrange(desc(Rating_per_Reviews)) %>% 
+    mutate(text = paste0("Rating per Reviews: ", Rating_per_Reviews, " Rating per Reviews"))
+
+neigh_tools %>% 
+  head(5)
+```
+
+
+```{r}
+neigh_group_2 <- ggplot(neigh_tools, aes(x=reorder(neighbourhood_group, Rating_per_Reviews), y=Rating_per_Reviews, text = text)) +
+    geom_col(aes(fill=Rating_per_Reviews), show.legend = F) +
+    coord_flip() +
+    labs(title = NULL,
+         y = "Neigbourhood Group",
+         x = NULL) +
+    # scale_y_continuous(limits = c(0, 275),
+    #                    breaks = seq(0,250, 50)) +
+    scale_fill_gradient(low = "#9AFE2E", high = "#0B6121") +
+    theme(plot.title = element_text(face = "bold", size = 14, hjust = 0.04),
+          axis.ticks.y = element_blank(),
+          panel.background = element_rect(fill = "#ffffff"), 
+          panel.grid.major.x = element_line(colour = "grey"),
+          axis.line.x = element_line(color = "grey"),
+          axis.text = element_text(size = 10, colour = "black"))
+
+```
+
+```{r}
+ ggplotly(neigh_group_2, tooltip = "text")
+```
+
+
+
+```{r}
+neighborhoods <-  airbnb_clean %>% 
+  group_by(neighbourhood) %>% 
+  filter(room_type == "Private room") %>% 
+  summarise(avg = as.integer(mean(price))) %>% 
+  arrange(-avg) %>% 
+  head(10)%>% 
+  mutate(text = paste0("Average Price Private Room : ", avg))
+
+
+
+```
+
+
+```{r}
+neighborhoods_group <- ggplot(neighborhoods, aes(x=reorder(neighbourhood, avg), y=avg, text = text)) +
+    geom_col(aes(fill=avg), show.legend = F) +
+    coord_flip() +
+    labs(title = NULL,
+         y = "Average Price",
+         x = NULL) +
+    # scale_y_continuous(limits = c(0, 275),
+    #                    breaks = seq(0,250, 50)) +
+    scale_fill_gradient(low = "#9AFE2E", high = "#0B6121") +
+    theme(plot.title = element_text(face = "bold", size = 14, hjust = 0.04),
+          axis.ticks.y = element_blank(),
+          panel.background = element_rect(fill = "#ffffff"), 
+          panel.grid.major.x = element_line(colour = "grey"),
+          axis.line.x = element_line(color = "grey"),
+          axis.text = element_text(size = 10, colour = "black"))
+```
+
+
+```{r}
+ggplotly(neighborhoods_group, tooltip = "text")
+```
+
+
+```{r}
+airbnbframe <- airbnb_clean %>%
+  select(neighbourhood, everything()) 
+colnames(airbnbframe) <- gsub(pattern = "[_]", replacement = " ", colnames(airbnbframe))
+```
+
+```{r}
+airbnbframe
+```
+
+
+```{r}
+airbnb_clean
+```
+
+
+```{r}
+scat_plot_data <- airbnb_clean %>% 
+  select(neighbourhood_group, number_of_reviews, rating_per_reviews, price,room_type) %>%
+  filter(room_type == "Private room") %>%
+  mutate(text = paste0("Neighbourhood Group: ", neighbourhood_group,"<br>",
+                       "Rating: ", number_of_reviews, "<br>",
+                       "Rating Per Review: ", rating_per_reviews, "<br>",
+                       "Room Price: ","$", price))
+```
+
+```{r}
+hexp <-  ggplot(scat_plot_data, aes(x = number_of_reviews, y = rating_per_reviews, text = text)) +
+        geom_point(aes(color = neighbourhood_group, size=rating_per_reviews),alpha=0.5) +
+        scale_color_manual(values = c("#9bcd9b", "#caff70","#f653a6", "#ff4040","#88e3fa")) +
+        labs(title = "",
+             y = "Rating per Reviews",
+             x = "Rating")
+```
+
+```{r}
+ ggplotly(hexp, tooltip = "text")%>%
+        layout(
+            legend = list(orientation = "v",
+                          y = 1, x = 0))
+```
+
+```{r}
+hist_plot <- airbnb_clean %>% 
+  select(neighbourhood_group, price, neighbourhood, service_fee,room_type) %>%
+  group_by(neighbourhood) %>%
+  filter(price >= 100) %>%
+  summarise(avg = as.integer(mean(price))) %>%
+  arrange(-avg) %>%
+  mutate(text = paste0("Neighbourhood Group: ", neighbourhood,"<br>",
+                       "Average Price: ",avg,"<br>"))
+                       #"Neighbourhood: ", neighbourhood, "<br>",
+                       #"Room Type: ", room_type, "<br>",
+                       #"Room Price: ","$", price,"br",
+                       #"Service Fee: ","$", service_fee))
+```
+
+
+
+```{r}
+hist_plots <- ggplot(hist_plot, aes(x=avg, text = text)) +
+    geom_histogram( binwidth=25, fill="#69b3a2", color="#e9ecef", alpha=0.9) +
+    ggtitle("") +
+    theme_ipsum() +
+    theme(
+      plot.title = element_text(size=15)
+    )
+```
+
+
+```{r}
+ggplotly(hist_plots, tooltip = "text")
+```
+
